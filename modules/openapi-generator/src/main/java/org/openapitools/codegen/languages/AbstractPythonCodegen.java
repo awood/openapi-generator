@@ -163,12 +163,19 @@ public abstract class AbstractPythonCodegen extends DefaultCodegen implements Co
         typeMapping.put("null", "none_type");
 
         regexModifiers = new HashMap<Character, String>();
-        regexModifiers.put('i', "IGNORECASE");
-        regexModifiers.put('l', "LOCALE");
-        regexModifiers.put('m', "MULTILINE");
-        regexModifiers.put('s', "DOTALL");
-        regexModifiers.put('u', "UNICODE");
-        regexModifiers.put('x', "VERBOSE");
+
+        regexModifiers.put('i', "i"); // IGNORECASE
+        regexModifiers.put('l', "L"); // LOCALE
+        regexModifiers.put('m', "m"); // MULTILINE
+        regexModifiers.put('s', "s"); // DOTALL
+        regexModifiers.put('u', "u"); // UNICODE
+        regexModifiers.put('x', "x"); // VERBOSE
+//        regexModifiers.put('i', "IGNORECASE");
+//        regexModifiers.put('l', "LOCALE");
+//        regexModifiers.put('m', "MULTILINE");
+//        regexModifiers.put('s', "DOTALL");
+//        regexModifiers.put('u', "UNICODE");
+//        regexModifiers.put('x', "VERBOSE");
     }
 
     @Override
@@ -1328,30 +1335,18 @@ public abstract class AbstractPythonCodegen extends DefaultCodegen implements Co
         return objs;
     }
 
-
-    @Override
-    public void postProcessParameter(CodegenParameter parameter) {
-        postProcessPattern(parameter.pattern, parameter.vendorExtensions);
-    }
-
-    @Override
-    public void postProcessModelProperty(CodegenModel model, CodegenProperty property) {
-        postProcessPattern(property.pattern, property.vendorExtensions);
-    }
-
     /*
      * The OpenAPI pattern spec follows the Perl convention and style of modifiers. Python
      * does not support this in as natural a way so it needs to convert it. See
-     * https://docs.python.org/2/howto/regex.html#compilation-flags for details.
+     * https://docs.python.org/3/howto/regex.html#compilation-flags and
+     * https://docs.python.org/3/library/re.html#regular-expression-syntax
+     * for details on how these modifiers are embedded at the beginning of the pattern.
      *
-     * @param pattern (the String pattern to convert from python to Perl convention)
-     * @param vendorExtensions (list of custom x-* properties for extra functionality-see https://swagger.io/docs/specification/openapi-extensions/)
-     * @return void
+     * @param pattern (the String pattern to convert from Python to Perl convention)
+     * @return a converted version of the pattern
      * @throws IllegalArgumentException if pattern does not follow the Perl /pattern/modifiers convention
-     *
-     * Includes fix for issue #6675
      */
-    public void postProcessPattern(String pattern, Map<String, Object> vendorExtensions) {
+    public String processPattern(String pattern) {
         if (pattern != null) {
             int i = pattern.lastIndexOf('/');
 
@@ -1363,19 +1358,20 @@ public abstract class AbstractPythonCodegen extends DefaultCodegen implements Co
             }
 
             String regex = pattern.substring(1, i).replace("'", "\\'");
-            List<String> modifiers = new ArrayList<String>();
+            char[] providedModifiers = pattern.substring(i).toCharArray();
+            StringBuilder modifierClause = new StringBuilder();
 
-            for (char c : pattern.substring(i).toCharArray()) {
-                if (regexModifiers.containsKey(c)) {
-                    String modifier = regexModifiers.get(c);
-                    modifiers.add(modifier);
-                }
+            for (char c : providedModifiers) {
+                modifierClause.append(regexModifiers.getOrDefault(c, ""));
             }
 
-            vendorExtensions.put("x-regex", regex.replace("\"", "\\\""));
-            vendorExtensions.put("x-pattern", pattern.replace("\"", "\\\""));
-            vendorExtensions.put("x-modifiers", modifiers);
+            String escapedRegex = regex.replace("\"", "\\\"");
+            if (modifierClause.length() > 0) {
+                return "(?" + modifierClause.toString() + ")" + escapedRegex;
+            }
+            return escapedRegex;
         }
+        return null;
     }
 
     @Override
@@ -1812,12 +1808,10 @@ public abstract class AbstractPythonCodegen extends DefaultCodegen implements Co
                 if (cp.getMinLength() != null) {
                     pt.constrain("min_length", cp.getMinLength());
                 }
-
                 if (cp.getPattern() != null) {
-                    moduleImports.add("pydantic", "field_validator");
-                    // use validator instead as regex doesn't support flags, e.g. IGNORECASE
-                    //fieldCustomization.add(Locale.ROOT, String.format(Locale.ROOT, "regex=r'%s'", cp.getPattern()));
+                    pt.constrain("pattern", processPattern(cp.getPattern()));
                 }
+
                 return pt;
             } else {
                 if ("password".equals(cp.getFormat())) { // TDOO avoid using format, use `is` boolean flag instead

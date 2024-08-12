@@ -48,6 +48,7 @@ nb-configuration.xml
 *.xml~
 *.t~
 
+**/bin
 /target
 /generated-files
 test-output/
